@@ -30,3 +30,30 @@ After the request is processed, you will receive a response similar to this:
 	}  
 }
 ```
+
+**If Both server are out of service:**
+```declarative
+{
+    "status": "FAILURE",
+    "message": "Both Server1 and Server2 are down.",
+    "body": null
+}
+```
+
+**If only server 1 is out of service:**
+```declarative
+{
+    "status": "FAILURE",
+    "message": "Server1 is down. Please try after sometime.",
+    "body": null
+}
+```
+
+**If only server 2 is out of service:**
+```declarative
+{
+    "status": "FAILURE",
+    "message": "Server2 is down. Please try after sometime.",
+    "body": null
+}
+```
