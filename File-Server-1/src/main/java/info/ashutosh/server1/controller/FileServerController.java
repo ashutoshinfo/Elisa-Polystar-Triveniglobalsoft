@@ -4,6 +4,7 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StreamUtils;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
@@ -13,12 +14,18 @@ import java.io.InputStream;
 
 @RestController
 @RequestMapping("/file")
-public class FileController {
+public class FileServerController {
 
-    @GetMapping("/frankenstein")
-    public ResponseEntity<StreamingResponseBody> getFrankenstein() throws IOException, InterruptedException {
-//        Thread.sleep(5000);
-        InputStream is = new ClassPathResource("frankenstein.txt").getInputStream();
+    @GetMapping("/{name}")
+    public ResponseEntity<StreamingResponseBody> getFile(@PathVariable String name) throws IOException {
+        // for simplicity
+
+        // Optional: Validate allowed files only (prevent path traversal attacks)
+        if (!name.equalsIgnoreCase("dracula") && !name.equalsIgnoreCase("frankenstein")) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        InputStream is = new ClassPathResource(name+".txt").getInputStream();
         return ResponseEntity.ok(outputStream -> {
             StreamUtils.copy(is, outputStream);
         });

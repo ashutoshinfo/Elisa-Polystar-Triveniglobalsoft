@@ -13,9 +13,9 @@ import java.io.InputStream;
 
 @RestController
 @RequestMapping("/file")
-public class FileController {
+public class FileServerController {
 
-    @GetMapping("/dracula")
+    @GetMapping("/{name}")
     public ResponseEntity<StreamingResponseBody> getFrankenstein() throws IOException {
         InputStream is = new ClassPathResource("dracula.txt").getInputStream();
         return ResponseEntity.ok(outputStream -> {

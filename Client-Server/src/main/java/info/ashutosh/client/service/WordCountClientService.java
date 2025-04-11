@@ -1,93 +1,88 @@
 package info.ashutosh.client.service;
 
+import info.ashutosh.client.model.ApiResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.ResponseEntity;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
-import org.springframework.http.ResponseEntity;
 
-import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CompletableFuture;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Service
 public class WordCountClientService {
 
-    @Value("${server1.url}")
-    private String server1Url;
-
-    @Value("${server2.url}")
-    private String server2Url;
-
     @Autowired
     private RestTemplate restTemplate;
 
-    public WordCountClientService(RestTemplate restTemplate) {
-        this.restTemplate = restTemplate;
+    @Value("${server1.url}")
+    private String server1Url;
+
+    public ApiResponse<Map<String, Integer>> getTopWordsFromBothServers() throws Exception {
+        CompletableFuture<Map<String, Integer>> future1 = fetchWordCount(server1Url, server1Url, "dracula");
+        CompletableFuture<Map<String, Integer>> future2 = fetchWordCount(server1Url, server1Url, "frankenstein");
+
+        CompletableFuture.allOf(future1, future2).join();
+
+        Map<String, Integer> data1 = future1.get();
+        Map<String, Integer> data2 = future2.get();
+
+        if (data1.isEmpty() && data2.isEmpty()) {
+            return new ApiResponse<>("FAILURE", "Both Server1 and Server2 are down.", null);
+        }
+        if (data1.isEmpty()) {
+            return new ApiResponse<>("FAILURE", "Server1 is down. Please try after sometime.", null);
+        }
+        if (data2.isEmpty()) {
+            return new ApiResponse<>("FAILURE", "Server2 is down. Please try after sometime.", null);
+        }
+
+        Map<String, Integer> combinedWordCount = new HashMap<>(data1);
+        data2.forEach((k, v) -> combinedWordCount.merge(k, v, Integer::sum));
+
+        Map<String, Integer> top5Words = combinedWordCount.entrySet()
+                .parallelStream()
+                .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                .limit(5)
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue,
+                        (e1, e2) -> e1, LinkedHashMap::new));
+
+        return new ApiResponse<>("SUCCESS", "Top 5 words fetched successfully", top5Words);
     }
 
-    // Count words from the given URL and return a word frequency map
-    public Map<String, Integer> countWordsFromFile(String fileUrl) {
-        Map<String, Integer> wordCountMap = new HashMap<>();
-
+    @Async
+    public CompletableFuture<Map<String, Integer>> fetchWordCount(String url, String serverName, String fileNme) {
         try {
-            // Make the GET request to the file URL
-            ResponseEntity<byte[]> response = restTemplate.getForEntity(fileUrl, byte[].class);
-            BufferedReader reader = new BufferedReader(new InputStreamReader(
-                    new ByteArrayInputStream(response.getBody()), StandardCharsets.UTF_8));
-
-            String line;
-            while ((line = reader.readLine()) != null) {
-                String[] words = line.split("\\s+");
-                for (String word : words) {
-                    word = word.toLowerCase().replaceAll("[^a-zA-Z]", ""); // Clean up word
-                    wordCountMap.put(word, wordCountMap.getOrDefault(word, 0) + 1);
-                }
+            ResponseEntity<String> response = restTemplate.getForEntity(url + "/" + fileNme, String.class);
+            if (response.getStatusCode().is2xxSuccessful()) {
+                return CompletableFuture.completedFuture(countWords(response.getBody()));
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            System.out.println(serverName + " error: " + e.getMessage());
+        }
+        // return empty map on failure
+        return CompletableFuture.completedFuture(new HashMap<>());
+    }
+
+    public Map<String, Integer> countWords(String content) {
+        Map<String, Integer> wordCountMap = new HashMap<>();
+
+        // Pattern to match words (any non-space continuous characters)
+        Pattern pattern = Pattern.compile("\\S+");
+        Matcher matcher = pattern.matcher(content);
+
+        while (matcher.find()) {
+            String word = matcher.group();  // Extract the word as-is (no modification)
+            wordCountMap.merge(word, 1, Integer::sum);  // Merge is optimal for counting
         }
 
         return wordCountMap;
-    }
-
-    // Method to fetch data from both servers in parallel
-    public Map<String, Integer> fetchAndCountWordsInParallel() throws InterruptedException {
-        // To count words from both servers in parallel
-        CountDownLatch latch = new CountDownLatch(2); // Two tasks: one for each server
-        Map<String, Integer> finalWordCountMap = new HashMap<>();
-
-        // Fetch data from server1 (Frankenstein) in a separate thread
-        Thread server1Thread = new Thread(() -> {
-            Map<String, Integer> server1WordCount = countWordsFromFile(server1Url);
-            synchronized (finalWordCountMap) {
-                mergeWordCounts(finalWordCountMap, server1WordCount);
-            }
-            latch.countDown();
-        });
-
-        // Fetch data from server2 (Dracula) in a separate thread
-        Thread server2Thread = new Thread(() -> {
-            Map<String, Integer> server2WordCount = countWordsFromFile(server2Url);
-            synchronized (finalWordCountMap) {
-                mergeWordCounts(finalWordCountMap, server2WordCount);
-            }
-            latch.countDown();
-        });
-
-        server1Thread.start();
-        server2Thread.start();
-
-        latch.await(); // Wait until both threads are done
-        return finalWordCountMap;
-    }
-
-    // Helper method to merge word counts from both servers
-    private void mergeWordCounts(Map<String, Integer> finalWordCountMap, Map<String, Integer> newWordCount) {
-        newWordCount.forEach((word, count) -> finalWordCountMap.put(word, finalWordCountMap.getOrDefault(word, 0) + count));
     }
 }
